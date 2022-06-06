@@ -15,16 +15,16 @@ export class Report {
   title: string;
 
   @Prop({ required: true })
-  dateStart: Date;
+  dateStart: number;
 
   @Prop()
-  dateEnd: Date;
+  dateEnd: number;
 
   @Prop()
   pause: [
     {
-      pauseStart: Date;
-      pauseEnd: Date;
+      pauseStart: number;
+      pauseEnd: number;
     },
   ];
 

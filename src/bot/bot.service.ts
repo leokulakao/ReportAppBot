@@ -3,11 +3,20 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, UserDocument } from './schemas/user.schema';
 import * as TelegramBot from 'node-telegram-bot-api';
-import { Report, ReportDocument, PauseModel } from './schemas/report.schema';
+import { Report, ReportDocument } from './schemas/report.schema';
+import * as moment from 'moment';
+
+import * as EN from './i18n/en.json';
+import * as ES from './i18n/es.json';
 @Injectable()
 export class BotService {
   private _bot: TelegramBot;
   private _token: string;
+
+  private _LANG_LIST = {
+    en: EN,
+    es: ES,
+  };
 
   constructor(
     @InjectModel(User.name) private _userModel: Model<UserDocument>,
@@ -17,13 +26,6 @@ export class BotService {
   onModuleInit() {
     this._token = this._getToken();
     this._bot = new TelegramBot(this._token, { polling: true });
-    this._bot.setMyCommands([
-      { command: 'start', description: 'Start the bot' },
-      { command: 'report', description: 'Start new report' },
-      { command: 'add', description: 'Add new report' },
-      { command: 'list', description: 'Get list reports' },
-      { command: 'month', description: 'Get month report' },
-    ]);
     console.log('Telegram Bot started');
     this._onCallbackQuery();
     this._resetTextListeners();
@@ -31,6 +33,33 @@ export class BotService {
 
   private _getToken(): string {
     return process.env.BOT_TOKEN;
+  }
+
+  private _getTranslate(userLang: string, key: string): string {
+    if (!!key || key.length > 0) {
+      switch (userLang) {
+        case 'en':
+          return this._LANG_LIST['en'][key];
+          break;
+        case 'es':
+          return this._LANG_LIST['es'][key];
+          break;
+        default:
+          return this._LANG_LIST['en'][key];
+          break;
+      }
+    }
+  }
+
+  private async _countReportTime(reportId) {
+    const report = await this._reportModel.findById(reportId);
+
+    let minutes;
+    let hours;
+    let days;
+    let weeks;
+
+    // for count
   }
 
   private async _resetTextListeners() {
@@ -41,20 +70,51 @@ export class BotService {
 
   private _onStart() {
     this._bot.onText(/\/start/, async (msg, match) => {
+      this._bot.setMyCommands([
+        {
+          command: 'start',
+          description: this._getTranslate(
+            msg.from.language_code,
+            'COMMAND_START',
+          ),
+        },
+        {
+          command: 'report',
+          description: this._getTranslate(
+            msg.from.language_code,
+            'COMMAND_REPORT',
+          ),
+        },
+      ]);
+      console.log('msg', msg);
       const chatId = msg.chat.id;
       const candidate = await this._userModel.find({ chatId: chatId });
       if (candidate.length === 0) {
+        console.log(msg);
         const createUser = new this._userModel({
           chatId: chatId,
           firstName: msg.from.first_name ? msg.from.first_name : '',
           lastName: msg.from.last_name ? msg.from.last_name : '',
           username: msg.from.username,
-          date: new Date(),
+          date: moment().utc(),
+          lang: msg.from.language_code,
         });
         await createUser.save();
-        this._bot.sendMessage(chatId, 'Hello ' + msg.from.first_name);
+        this._bot.sendMessage(
+          chatId,
+          this._getTranslate(msg.from.language_code, 'USER_WELCOME'),
+        );
       } else {
-        console.log('user is exist');
+        const updateUser = await this._userModel.findOne({ chatId: chatId });
+        updateUser.firstName = msg.from.first_name ? msg.from.first_name : '';
+        updateUser.lastName = msg.from.last_name ? msg.from.last_name : '';
+        updateUser.username = msg.from.username;
+        updateUser.lang = msg.from.language_code;
+        await updateUser.save();
+        this._bot.sendMessage(
+          chatId,
+          this._getTranslate(msg.from.language_code, 'USER_HELLO'),
+        );
       }
     });
   }
@@ -161,8 +221,8 @@ export class BotService {
     const result = await this._reportModel.findByIdAndUpdate(reportId);
     result.pauseOn = true;
     result.pause.push({
-      pauseStart: new Date(),
-      pauseEnd: new Date('0000-00-00T00:00:00.000+00:00'),
+      pauseStart: +moment().utc(),
+      pauseEnd: 0,
     });
     await result.save();
   }
@@ -172,7 +232,7 @@ export class BotService {
     result.pauseOn = false;
     result.pause[result.pause.length - 1] = {
       pauseStart: result.pause[result.pause.length - 1].pauseStart,
-      pauseEnd: new Date(),
+      pauseEnd: +moment().utc(),
     };
     await result.save();
     console.log();
@@ -191,14 +251,23 @@ export class BotService {
     await setMessageId.save();
   }
 
+  private async _getUserByChatId(chatId) {
+    const result = await this._userModel.findOne({ chatId: chatId });
+    return result;
+  }
+
   private async _createReport(chatId, userId) {
-    console.log(chatId);
-    await this._bot.sendMessage(chatId, 'Escribe nonbre de la predi');
+    const user = await this._getUserByChatId(chatId);
+    console.log(user);
+    await this._bot.sendMessage(
+      chatId,
+      this._getTranslate(user.lang, 'REPORT_TITLE_INIT'),
+    );
     this._bot.onText(/./, async (msg, match) => {
       const result = new this._reportModel({
         userId: userId,
         title: msg.text,
-        dateStart: new Date(),
+        dateStart: +moment().utc(),
       });
       await result.save();
       await this._sendReport(chatId, result._id);
@@ -234,7 +303,7 @@ export class BotService {
   private async _reportComplete(reportId) {
     const result = await this._reportModel.findByIdAndUpdate(reportId, {
       completed: true,
-      dateEnd: new Date(),
+      dateEnd: +moment().utc(),
     });
     await result.save();
   }

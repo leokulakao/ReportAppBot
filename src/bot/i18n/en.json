@@ -1,0 +1,8 @@
+{
+    "COMMAND_START": "Start the bot",
+    "COMMAND_REPORT": "Start counting the time or show the counter already started",
+    "USER_HELLO": "Hello! 👋 \nThis is Report App Bot. He will help you report your hours dedicated to preaching and will also manage all the publications, videos and return visits. \n\nYou have already registered!",
+    "USER_WELCOME": "Welcome! 👋 \nThis is Report App Bot. He will help you report your hours dedicated to preaching and will also manage all the publications, videos and return visits",
+
+    "REPORT_TITLE_INIT": "Enter a title for a new counter"
+}

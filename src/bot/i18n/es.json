@@ -1,0 +1,8 @@
+{
+    "COMMAND_START": "Iniciar el bot",
+    "COMMAND_REPORT": "Empezar contar el tiempo o mostrar el contador ya iniciado ",
+    "USER_HELLO": "Hola! 👋 \nEsto es Report App Bot. El te ayudará a reportar tus horas dedicadas a la predicación y tambien gestionará todas las publicaciones, videos y revisitas. \n\nTú ya has registrado!",
+    "USER_WELCOME": "Bienvenid@! 👋 \nEsto es Report App Bot. El te ayudará a reportar tus horas dedicadas a la predicación y tambien gestionará todas las publicaciones, videos y revisitas.",
+
+    "REPORT_TITLE_INIT": "Introduce un título a un nuevo contador"
+}
