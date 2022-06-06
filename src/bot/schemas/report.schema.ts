@@ -8,7 +8,7 @@ export class Report {
   @Prop({ required: true })
   userId: string;
 
-  @Prop({ required: true, unique: true })
+  @Prop()
   messageId: string;
 
   @Prop({ default: false })
@@ -27,6 +27,9 @@ export class Report {
       pauseEnd: Date;
     },
   ];
+
+  @Prop({ required: true, default: false })
+  pauseOn: boolean;
 
   @Prop()
   publications: number;

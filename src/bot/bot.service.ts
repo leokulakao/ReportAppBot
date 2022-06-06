@@ -9,50 +9,6 @@ export class BotService {
   private _bot: TelegramBot;
   private _token: string;
 
-  private _REPORT_OPTIONS_START = {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: 'Get Time',
-            callback_data: 'report_get_time',
-          },
-          {
-            text: 'Pausa',
-            callback_data: 'report_pause',
-          },
-          {
-            text: 'Stop',
-            callback_data: 'report_stop',
-          },
-        ],
-      ],
-    },
-  };
-
-  private _REPORT_OPTIONS_PAUSE = {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: 'Get Time',
-            callback_data: 'report_get_time',
-          },
-          {
-            text: 'Start',
-            callback_data: 'report_pause_start',
-          },
-          {
-            text: 'Stop',
-            callback_data: 'report_stop',
-          },
-        ],
-      ],
-    },
-  };
-
   constructor(
     @InjectModel(User.name) private _userModel: Model<UserDocument>,
     @InjectModel(Report.name) private _reportModel: Model<ReportDocument>,
@@ -103,28 +59,73 @@ export class BotService {
     });
   }
 
-  private _onCallbackQuery() {
+  private async _onCallbackQuery() {
     this._bot.on('callback_query', async (callbackQuery) => {
-      switch (callbackQuery?.data) {
-        case 'report_get_time':
-          this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
-          break;
-        case 'report_pause_start':
-          this._updateMessageOnReport(
-            callbackQuery?.message?.chat?.id,
-            callbackQuery?.message?.message_id,
-            'start',
-            false,
-          );
-          break;
-        case 'report_pause':
-          this._updateMessageOnReport(
-            callbackQuery?.message?.chat?.id,
-            callbackQuery?.message?.message_id,
-            'pause',
-            false,
-          );
-          break;
+      const reportCandidate = await this._getReportNoCompleted();
+      if (!!reportCandidate) {
+        switch (callbackQuery?.data) {
+          case 'report_get_time':
+            if (reportCandidate.messageId == callbackQuery.message.message_id) {
+              this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
+            } else {
+              this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
+            }
+            break;
+          case 'report_pause_start':
+            if (reportCandidate.messageId == callbackQuery.message.message_id) {
+              this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
+              console.log(callbackQuery);
+              await this._startPause(reportCandidate._id);
+              await this._sendReport(
+                callbackQuery.message.chat.id,
+                reportCandidate._id,
+                'pause',
+              );
+              await this._bot.deleteMessage(
+                callbackQuery.message.chat.id,
+                callbackQuery.message.message_id,
+              );
+            } else {
+              this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
+            }
+            break;
+          case 'report_pause':
+            if (reportCandidate.messageId == callbackQuery.message.message_id) {
+              this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
+              await this._sendReport(
+                callbackQuery.message.chat.id,
+                reportCandidate._id,
+                'start',
+              );
+              await this._bot.deleteMessage(
+                callbackQuery.message.chat.id,
+                callbackQuery.message.message_id,
+              );
+              await this._stopPause(reportCandidate._id);
+            } else {
+              this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
+            }
+            break;
+          case 'report_stop':
+            if (reportCandidate.messageId == callbackQuery.message.message_id) {
+              await this._reportComplete(reportCandidate._id);
+              await this._bot.deleteMessage(
+                callbackQuery.message.chat.id,
+                callbackQuery.message.message_id,
+              );
+              // await this._bot.sendMessage(
+              //   callbackQuery.message.chat.id,
+              //   'Success white report ti start',
+              // );
+              this._bot.answerCallbackQuery(
+                callbackQuery?.id,
+                'Success white /report ti start',
+              );
+            } else {
+              this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
+            }
+            break;
+        }
       }
     });
   }
@@ -133,140 +134,108 @@ export class BotService {
     this._bot.onText(/\/report/, async (msg, match) => {
       const chatId = msg.chat.id;
       const candidate = await this._userModel.findOne({ chatId: chatId });
-      const reportCandidate = await this._reportModel.findOne({
-        completed: false,
-      });
+      const reportCandidate = await this._getReportNoCompleted();
       if (!!candidate) {
         if (!!reportCandidate) {
-          const indexNotEnded = await this._reportIsNotPaused(
-            reportCandidate._id,
-          );
-          let mode: string;
-          if (indexNotEnded.length > 0) {
-            mode = 'pause';
-          } else {
-            mode = 'start';
-          }
-          console.log('mode', mode);
-          await this._updateMessageOnReport(
+          await this._sendReport(
             chatId,
-            reportCandidate.messageId,
-            mode,
-            true,
+            reportCandidate._id,
+            !!reportCandidate.pauseOn ? 'stop' : 'start',
           );
         } else {
-          await this._startMessageOnReport(chatId, candidate?._id);
+          console.log('create');
+          await this._createReport(chatId, candidate._id);
         }
       }
     });
   }
 
-  private async _sendMessageOnReport(chatId, title, mode) {
-    return await this._bot.sendMessage(
+  private async _getReportNoCompleted() {
+    const result = await this._reportModel.findOne({
+      completed: false,
+    });
+    return result;
+  }
+
+  private async _startPause(reportId) {
+    const result = await this._reportModel.findByIdAndUpdate(reportId);
+    result.pauseOn = true;
+    result.pause.push({
+      pauseStart: new Date(),
+      pauseEnd: new Date('0000-00-00T00:00:00.000+00:00'),
+    });
+    await result.save();
+  }
+
+  private async _stopPause(reportId) {
+    const result = await this._reportModel.findByIdAndUpdate(reportId);
+    result.pauseOn = false;
+    result.pause[result.pause.length - 1] = {
+      pauseStart: result.pause[result.pause.length - 1].pauseStart,
+      pauseEnd: new Date(),
+    };
+    await result.save();
+    console.log();
+  }
+
+  private async _sendReport(chatId, reportId, mode = 'start') {
+    const result = await this._reportModel.findByIdAndUpdate(reportId);
+    const message = await this._bot.sendMessage(
       chatId,
-      'Title: ' + title,
-      mode === 'start'
-        ? this._REPORT_OPTIONS_START
-        : this._REPORT_OPTIONS_PAUSE,
+      'Title: ' + result.title + ' id: ' + result._id,
+      this._getInlineKeyboard(mode, reportId),
     );
+    const setMessageId = await this._reportModel.findByIdAndUpdate(reportId, {
+      messageId: message.message_id,
+    });
+    await setMessageId.save();
   }
 
-  private async _startMessageOnReport(chatId, userId) {
-    this._bot.sendMessage(chatId, 'Set title to the report').then(() => {
-      this._bot.onText(/./, async (msg, match) => {
-        const newTitle = msg.text;
-        const message = await this._sendMessageOnReport(
-          chatId,
-          newTitle,
-          'start',
-        );
-        const newReport = new this._reportModel({
-          userId: userId,
-          dateStart: new Date(),
-          title: newTitle,
-          messageId: message.message_id,
-          completed: false,
-        });
-        newReport.save().then(async (sevedReport) => {
-          await this._resetTextListeners();
-        });
+  private async _createReport(chatId, userId) {
+    console.log(chatId);
+    await this._bot.sendMessage(chatId, 'Escribe nonbre de la predi');
+    this._bot.onText(/./, async (msg, match) => {
+      const result = new this._reportModel({
+        userId: userId,
+        title: msg.text,
+        dateStart: new Date(),
       });
+      await result.save();
+      await this._sendReport(chatId, result._id);
+      await this._resetTextListeners();
     });
   }
 
-  private async _updateMessageOnReport(chatId, messageId, mode, newCommand) {
-    try {
-      if (newCommand === false) {
-        await this._bot.deleteMessage(chatId, messageId);
-      }
-
-      const reportByMessageId = await this._getReportByMessageId(messageId);
-
-      const newMessage = await this._sendMessageOnReport(
-        chatId,
-        reportByMessageId?.title,
-        mode,
-      );
-
-      const candidateReport = await this._reportModel.findByIdAndUpdate(
-        reportByMessageId._id,
-      );
-      candidateReport.messageId = newMessage.message_id;
-      await candidateReport.save();
-
-      if (mode === 'start') {
-        await this._pausePauseOnReport(reportByMessageId._id);
-      } else if (mode === 'pause') {
-        await this._startPauseOnReport(reportByMessageId._id);
-      }
-    } catch (e) {
-      console.log(e);
-    }
+  private _getInlineKeyboard(mode, reportId) {
+    return {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '⏱️',
+              callback_data: 'report_get_time',
+            },
+            {
+              text: mode === 'start' ? '⏸️' : '▶️',
+              callback_data:
+                mode === 'start' ? 'report_pause_start' : 'report_pause',
+            },
+            {
+              text: '⏹️',
+              callback_data: 'report_stop',
+            },
+          ],
+        ],
+      },
+    };
   }
 
-  private async _getReportByMessageId(messageId) {
-    const result = await this._reportModel.findOne({ messageId: messageId });
-    return !!result ? result : null;
-  }
-
-  private async _startPauseOnReport(reportId) {
-    const result = await this._reportModel.findById(reportId);
-    const indexNotEnded = result.pause.map((element, index) => {
-      if (element.pauseEnd === null) {
-        return index;
-      }
+  private async _reportComplete(reportId) {
+    const result = await this._reportModel.findByIdAndUpdate(reportId, {
+      completed: true,
+      dateEnd: new Date(),
     });
-    if (indexNotEnded.length > 0) {
-      indexNotEnded.forEach((index) => {
-        result.pause[index].pauseEnd = new Date();
-      });
-    }
-    result.pause.push(new PauseModel().getPause());
-    return await result.save();
-  }
-
-  private async _pausePauseOnReport(reportId) {
-    const result = await this._reportModel.findById(reportId);
-    const indexNotEnded = result.pause.map((element, index) => {
-      if (element.pauseEnd === null) {
-        return index;
-      }
-    });
-    if (indexNotEnded.length > 0) {
-      indexNotEnded.forEach((index) => {
-        result.pause[index].pauseEnd = new Date();
-      });
-    }
-    return await result.save();
-  }
-
-  private async _reportIsNotPaused(reportId) {
-    const result = await this._reportModel.findById(reportId);
-    const indexNotEnded = result.pause.map((element, index) => {
-      if (element.pauseEnd === null) {
-        return index;
-      }
-    });
-    return indexNotEnded;
+    await result.save();
   }
 }
