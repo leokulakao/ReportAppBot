@@ -22,6 +22,9 @@ export class User {
 
   @Prop({ required: true })
   lang: string;
+
+  @Prop()
+  tz: string;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

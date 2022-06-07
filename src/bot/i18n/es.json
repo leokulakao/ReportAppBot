@@ -1,8 +1,17 @@
 {
     "COMMAND_START": "Iniciar el bot",
     "COMMAND_REPORT": "Empezar contar el tiempo o mostrar el contador ya iniciado ",
-    "USER_HELLO": "Hola! 👋 \nEsto es Report App Bot. El te ayudará a reportar tus horas dedicadas a la predicación y tambien gestionará todas las publicaciones, videos y revisitas. \n\nTú ya has registrado!",
-    "USER_WELCOME": "Bienvenid@! 👋 \nEsto es Report App Bot. El te ayudará a reportar tus horas dedicadas a la predicación y tambien gestionará todas las publicaciones, videos y revisitas.",
+    "COMMAND_LOCATION": "Establecer o cambiar la zona horaria por ubicación",
 
-    "REPORT_TITLE_INIT": "Introduce un título a un nuevo contador"
+    "USER_HELLO": "Hola! 👋 \nEsto es Report App Bot. El te ayudará a reportar tus horas dedicadas a la predicación y tambien gestionará todas las publicaciones, videos y revisitas. \n\nTú ya has registrado!",
+    "USER_WELCOME": "Bienvenid@! 👋 \nEsto es Report App Bot. El te ayudará a reportar tus horas dedicadas a la predicación y tambien gestionará todas las publicaciones, videos y revisitas. \n\nPara empezar contar tiempo escribe /report \nPara configurar la sona horario escribe /location",
+
+    "TIMEZONE_CHANGE_TEXT": "Elegie tu zona:",
+
+    "REPORT_TITLE_INIT": "Introduce un título a un nuevo contador",
+    "REPORT_MAIN_MESSAGE_1": "El contador ya está en marcha! ⏱ \n\nTítulo: ",
+    "REPORT_MAIN_MESSAGE_2": " \n",
+    "REPORT_MAIN_MESSAGE_3": "Fecha de inicio: ",
+    "REPORT_HOURS": "Horas",
+    "REPORT_MINUTES": "Minutos"
 }

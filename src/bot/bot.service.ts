@@ -5,6 +5,8 @@ import { User, UserDocument } from './schemas/user.schema';
 import * as TelegramBot from 'node-telegram-bot-api';
 import { Report, ReportDocument } from './schemas/report.schema';
 import * as moment from 'moment';
+import * as momentTz from 'moment-timezone';
+import { find } from 'geo-tz';
 
 import * as EN from './i18n/en.json';
 import * as ES from './i18n/es.json';
@@ -58,7 +60,7 @@ export class BotService {
     let reportDateStart = report.dateStart;
 
     if (!report.completed) {
-      reportDateEnd = +moment().utc();
+      reportDateEnd = +moment.utc();
       reportDateStart = report.dateStart;
     }
 
@@ -74,8 +76,8 @@ export class BotService {
     let durationPause = 0;
 
     for (let i = 0; i < report.pause.length; i++) {
-      const now = moment(report.pause[i]?.pauseEnd);
-      const end = moment(report.pause[i]?.pauseStart);
+      const now = moment(report.pause[i]?.pauseEnd).utc();
+      const end = moment(report.pause[i]?.pauseStart).utc();
       const duration = moment.duration(now.diff(end));
       durationPause = durationPause + +duration.asSeconds();
     }
@@ -83,10 +85,39 @@ export class BotService {
     return durationReportWithoutPause;
   }
 
+  private async _getDurationInDateFormat(durationInSeconds, chatId) {
+    const userLang = await (await this._getUserByChatId(chatId)).lang;
+    let minutes = 0;
+    let hours = 0;
+    if (durationInSeconds > 0) {
+      minutes = durationInSeconds / 60;
+      if (minutes > 60) {
+        hours = minutes / 60;
+        minutes = minutes - hours * 60;
+      }
+    }
+    return {
+      minutes: Math.trunc(minutes),
+      hours: Math.trunc(hours),
+      minutesText: this._getTranslate(userLang, 'REPORT_MINUTES'),
+      hoursText: this._getTranslate(userLang, 'REPORT_HOURS'),
+      durationResultText:
+        Math.trunc(hours) +
+        ' ' +
+        this._getTranslate(userLang, 'REPORT_HOURS') +
+        ', ' +
+        Math.trunc(minutes) +
+        ' ' +
+        this._getTranslate(userLang, 'REPORT_MINUTES'),
+      lang: userLang,
+    };
+  }
+
   private async _resetTextListeners() {
     await this._bot.clearTextListeners();
     this._onStart();
     this._onReport();
+    this._onLocation();
   }
 
   private _onStart() {
@@ -106,8 +137,14 @@ export class BotService {
             'COMMAND_REPORT',
           ),
         },
+        {
+          command: 'location',
+          description: this._getTranslate(
+            msg.from.language_code,
+            'COMMAND_LOCATION',
+          ),
+        },
       ]);
-      console.log('msg', msg);
       const chatId = msg.chat.id;
       const candidate = await this._userModel.find({ chatId: chatId });
       if (candidate.length === 0) {
@@ -117,7 +154,7 @@ export class BotService {
           firstName: msg.from.first_name ? msg.from.first_name : '',
           lastName: msg.from.last_name ? msg.from.last_name : '',
           username: msg.from.username,
-          date: moment().utc(),
+          date: +moment.utc(),
           lang: msg.from.language_code,
         });
         await createUser.save();
@@ -147,9 +184,13 @@ export class BotService {
         switch (callbackQuery?.data) {
           case 'report_get_time':
             if (reportCandidate.messageId == callbackQuery.message.message_id) {
+              const timeResult = await this._getDurationInDateFormat(
+                await this._countReportTimeInSeconds(reportCandidate._id),
+                callbackQuery.message.chat.id,
+              );
               this._bot.answerCallbackQuery(
                 callbackQuery?.id,
-                await this._countReportTimeInSeconds(reportCandidate._id),
+                timeResult.durationResultText,
               );
             } else {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
@@ -158,7 +199,6 @@ export class BotService {
           case 'report_pause_start':
             if (reportCandidate.messageId == callbackQuery.message.message_id) {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
-              console.log(callbackQuery);
               await this._startPause(reportCandidate._id);
               await this._sendReport(
                 callbackQuery.message.chat.id,
@@ -227,9 +267,18 @@ export class BotService {
             !!reportCandidate.pauseOn ? 'stop' : 'start',
           );
         } else {
-          console.log('create');
           await this._createReport(chatId, candidate._id);
         }
+      }
+    });
+  }
+
+  private _onLocation() {
+    this._bot.onText(/\/location/, async (msg, match) => {
+      const chatId = msg.chat.id;
+      const candidate = await this._userModel.findOne({ chatId: chatId });
+      if (!!candidate) {
+        await this._changeTz(chatId, candidate._id);
       }
     });
   }
@@ -245,7 +294,7 @@ export class BotService {
     const result = await this._reportModel.findByIdAndUpdate(reportId);
     result.pauseOn = true;
     result.pause.push({
-      pauseStart: +moment().utc(),
+      pauseStart: +moment.utc(),
       pauseEnd: 0,
     });
     await result.save();
@@ -256,18 +305,27 @@ export class BotService {
     result.pauseOn = false;
     result.pause[result.pause.length - 1] = {
       pauseStart: result.pause[result.pause.length - 1].pauseStart,
-      pauseEnd: +moment().utc(),
+      pauseEnd: +moment.utc(),
     };
     await result.save();
-    console.log();
   }
 
   private async _sendReport(chatId, reportId, mode = 'start') {
     const result = await this._reportModel.findByIdAndUpdate(reportId);
+    const user = await this._getUserByChatId(chatId);
     const message = await this._bot.sendMessage(
       chatId,
-      'Title: ' + result.title + ' id: ' + result._id,
-      this._getInlineKeyboard(mode, reportId),
+      this._getTranslate(user.lang, 'REPORT_MAIN_MESSAGE_1') +
+        result.title +
+        this._getTranslate(user.lang, 'REPORT_MAIN_MESSAGE_2') +
+        this._getTranslate(user.lang, 'REPORT_MAIN_MESSAGE_3') +
+        this._getTimeInString(
+          result.dateStart,
+          !!user.tz ? user.tz : null,
+          user.lang,
+          'LLLL',
+        ),
+      this._getInlineKeyboardForReport(mode, reportId),
     );
     const setMessageId = await this._reportModel.findByIdAndUpdate(reportId, {
       messageId: message.message_id,
@@ -275,14 +333,49 @@ export class BotService {
     await setMessageId.save();
   }
 
+  private _getTimeInString(momentData, timezone, userLang, format): string {
+    if (!!timezone) {
+      return momentTz(momentData).tz(timezone).locale(userLang).format(format);
+    } else {
+      return (
+        moment(momentData).utc().locale(userLang).format(format) + ' (UTC)'
+      );
+    }
+  }
+
   private async _getUserByChatId(chatId) {
     const result = await this._userModel.findOne({ chatId: chatId });
     return result;
   }
 
+  private async _changeTz(chatId, userId) {
+    const user = await this._getUserByChatId(chatId);
+    await this._bot.clearTextListeners();
+    await this._bot
+      .sendMessage(
+        chatId,
+        this._getTranslate(user.lang, 'TIMEZONE_CHANGE_TEXT'),
+        this._getReplyKeyboardForLocation(),
+      )
+      .then(async () => {
+        await this._bot.once('location', async (msg) => {
+          console.log();
+          const candidate = await this._userModel.findById(user._id);
+          candidate.tz = find(msg.location.latitude, msg.location.longitude)[0];
+          await candidate.save();
+          this._bot.sendMessage(
+            chatId,
+            'Location recived',
+            this._getReplyKeyboardForLocation(false),
+          );
+        });
+        await this._resetTextListeners();
+      });
+    await this._resetTextListeners();
+  }
+
   private async _createReport(chatId, userId) {
     const user = await this._getUserByChatId(chatId);
-    console.log(user);
     await this._bot.sendMessage(
       chatId,
       this._getTranslate(user.lang, 'REPORT_TITLE_INIT'),
@@ -291,7 +384,7 @@ export class BotService {
       const result = new this._reportModel({
         userId: userId,
         title: msg.text,
-        dateStart: +moment().utc(),
+        dateStart: +moment.utc(),
       });
       await result.save();
       await this._sendReport(chatId, result._id);
@@ -299,7 +392,30 @@ export class BotService {
     });
   }
 
-  private _getInlineKeyboard(mode, reportId) {
+  private _getReplyKeyboardForLocation(mode = true) {
+    if (!!mode) {
+      return {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          keyboard: [
+            [
+              {
+                text: 'Mi location',
+                request_location: true,
+              },
+            ],
+          ],
+        },
+      };
+    } else {
+      return {
+        parse_mode: 'Markdown',
+        reply_markup: { remove_keyboard: true },
+      };
+    }
+  }
+
+  private _getInlineKeyboardForReport(mode, reportId) {
     return {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -327,7 +443,7 @@ export class BotService {
   private async _reportComplete(reportId) {
     const result = await this._reportModel.findByIdAndUpdate(reportId, {
       completed: true,
-      dateEnd: +moment().utc(),
+      dateEnd: +moment.utc(),
     });
     await result.save();
   }
