@@ -51,15 +51,36 @@ export class BotService {
     }
   }
 
-  private async _countReportTime(reportId) {
+  private async _countReportTimeInSeconds(reportId) {
     const report = await this._reportModel.findById(reportId);
 
-    let minutes;
-    let hours;
-    let days;
-    let weeks;
+    let reportDateEnd = report.dateEnd;
+    let reportDateStart = report.dateStart;
 
-    // for count
+    if (!report.completed) {
+      reportDateEnd = +moment().utc();
+      reportDateStart = report.dateStart;
+    }
+
+    if (report.pauseOn) {
+      reportDateEnd = +report.pause[report.pause.length - 1]?.pauseEnd;
+      reportDateStart = report.dateStart;
+    }
+
+    const durationReport = moment
+      .duration(moment(reportDateEnd).diff(reportDateStart))
+      .asSeconds();
+
+    let durationPause = 0;
+
+    for (let i = 0; i < report.pause.length; i++) {
+      const now = moment(report.pause[i]?.pauseEnd);
+      const end = moment(report.pause[i]?.pauseStart);
+      const duration = moment.duration(now.diff(end));
+      durationPause = durationPause + +duration.asSeconds();
+    }
+    const durationReportWithoutPause = durationReport - durationPause;
+    return durationReportWithoutPause;
   }
 
   private async _resetTextListeners() {
@@ -126,7 +147,10 @@ export class BotService {
         switch (callbackQuery?.data) {
           case 'report_get_time':
             if (reportCandidate.messageId == callbackQuery.message.message_id) {
-              this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
+              this._bot.answerCallbackQuery(
+                callbackQuery?.id,
+                await this._countReportTimeInSeconds(reportCandidate._id),
+              );
             } else {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
             }
