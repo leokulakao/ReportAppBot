@@ -115,9 +115,11 @@ export class BotService {
 
   private async _resetTextListeners() {
     await this._bot.clearTextListeners();
+    await this._bot.removeListener('location');
     this._onStart();
     this._onReport();
     this._onLocation();
+    this._onStats();
   }
 
   private _onStart() {
@@ -179,6 +181,7 @@ export class BotService {
 
   private async _onCallbackQuery() {
     this._bot.on('callback_query', async (callbackQuery) => {
+      console.log(callbackQuery);
       const reportCandidate = await this._getReportNoCompleted();
       if (!!reportCandidate) {
         switch (callbackQuery?.data) {
@@ -200,15 +203,23 @@ export class BotService {
             if (reportCandidate.messageId == callbackQuery.message.message_id) {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
               await this._startPause(reportCandidate._id);
-              await this._sendReport(
-                callbackQuery.message.chat.id,
-                reportCandidate._id,
-                'pause',
-              );
-              await this._bot.deleteMessage(
-                callbackQuery.message.chat.id,
-                callbackQuery.message.message_id,
-              );
+              await this._bot.editMessageText(callbackQuery.message.text, {
+                chat_id: callbackQuery.message.chat.id,
+                message_id: callbackQuery.message.message_id,
+                reply_markup: this._getInlineKeyboardForReport(
+                  'stop',
+                  reportCandidate._id,
+                ).reply_markup,
+              });
+              // await this._sendReport(
+              //   callbackQuery.message.chat.id,
+              //   reportCandidate._id,
+              //   'pause',
+              // );
+              // await this._bot.deleteMessage(
+              //   callbackQuery.message.chat.id,
+              //   callbackQuery.message.message_id,
+              // );
             } else {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
             }
@@ -216,15 +227,23 @@ export class BotService {
           case 'report_pause':
             if (reportCandidate.messageId == callbackQuery.message.message_id) {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Hola');
-              await this._sendReport(
-                callbackQuery.message.chat.id,
-                reportCandidate._id,
-                'start',
-              );
-              await this._bot.deleteMessage(
-                callbackQuery.message.chat.id,
-                callbackQuery.message.message_id,
-              );
+              await this._bot.editMessageText(callbackQuery.message.text, {
+                chat_id: callbackQuery.message.chat.id,
+                message_id: callbackQuery.message.message_id,
+                reply_markup: this._getInlineKeyboardForReport(
+                  'start',
+                  reportCandidate._id,
+                ).reply_markup,
+              });
+              // await this._sendReport(
+              //   callbackQuery.message.chat.id,
+              //   reportCandidate._id,
+              //   'start',
+              // );
+              // await this._bot.deleteMessage(
+              //   callbackQuery.message.chat.id,
+              //   callbackQuery.message.message_id,
+              // );
               await this._stopPause(reportCandidate._id);
             } else {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
@@ -233,10 +252,14 @@ export class BotService {
           case 'report_stop':
             if (reportCandidate.messageId == callbackQuery.message.message_id) {
               await this._reportComplete(reportCandidate._id);
-              await this._bot.deleteMessage(
-                callbackQuery.message.chat.id,
-                callbackQuery.message.message_id,
-              );
+              await this._bot.editMessageText(callbackQuery.message.text, {
+                chat_id: callbackQuery.message.chat.id,
+                message_id: callbackQuery.message.message_id,
+              });
+              // await this._bot.deleteMessage(
+              //   callbackQuery.message.chat.id,
+              //   callbackQuery.message.message_id,
+              // );
               // await this._bot.sendMessage(
               //   callbackQuery.message.chat.id,
               //   'Success white report ti start',
@@ -248,6 +271,50 @@ export class BotService {
             } else {
               this._bot.answerCallbackQuery(callbackQuery?.id, 'Not Valid');
             }
+            break;
+          case 'current_year':
+            await this._bot.editMessageText(callbackQuery.message.text, {
+              chat_id: callbackQuery.message.chat.id,
+              message_id: callbackQuery.message.message_id,
+            });
+            await this._getStatsMouth(
+              callbackQuery.message.chat.id,
+              moment().utc().year(),
+            );
+            await this._resetTextListeners();
+            break;
+          case 'prev_year':
+            await this._bot.editMessageText(callbackQuery.message.text, {
+              chat_id: callbackQuery.message.chat.id,
+              message_id: callbackQuery.message.message_id,
+            });
+            await this._bot.sendMessage(
+              callbackQuery.message.chat.id,
+              'Año elegido es: ' + (moment().utc().year() - 1),
+            );
+            await this._resetTextListeners();
+            break;
+          case 'prev_prev_year':
+            await this._bot.editMessageText(callbackQuery.message.text, {
+              chat_id: callbackQuery.message.chat.id,
+              message_id: callbackQuery.message.message_id,
+            });
+            await this._bot.sendMessage(
+              callbackQuery.message.chat.id,
+              'Año elegido es: ' + (moment().utc().year() - 2),
+            );
+            await this._resetTextListeners();
+            break;
+          case 'mouth_6':
+            await this._bot.editMessageText(callbackQuery.message.text, {
+              chat_id: callbackQuery.message.chat.id,
+              message_id: callbackQuery.message.message_id,
+            });
+            await this._bot.sendMessage(
+              callbackQuery.message.chat.id,
+              'Año elegido es: ' + (moment().utc().year() - 2),
+            );
+            await this._resetTextListeners();
             break;
         }
       }
@@ -279,6 +346,16 @@ export class BotService {
       const candidate = await this._userModel.findOne({ chatId: chatId });
       if (!!candidate) {
         await this._changeTz(chatId, candidate._id);
+      }
+    });
+  }
+
+  private _onStats() {
+    this._bot.onText(/\/stats/, async (msg, match) => {
+      const chatId = msg.chat.id;
+      const candidate = await this._userModel.findOne({ chatId: chatId });
+      if (!!candidate) {
+        await this._getStats(chatId, candidate._id);
       }
     });
   }
@@ -351,28 +428,81 @@ export class BotService {
   private async _changeTz(chatId, userId) {
     const user = await this._getUserByChatId(chatId);
     await this._bot.clearTextListeners();
-    await this._bot
+    const result = await this._bot
       .sendMessage(
         chatId,
         this._getTranslate(user.lang, 'TIMEZONE_CHANGE_TEXT'),
         this._getReplyKeyboardForLocation(),
       )
-      .then(async () => {
-        await this._bot.once('location', async (msg) => {
-          console.log();
-          const candidate = await this._userModel.findById(user._id);
-          candidate.tz = find(msg.location.latitude, msg.location.longitude)[0];
-          await candidate.save();
-          this._bot.sendMessage(
-            chatId,
-            'Location recived',
-            this._getReplyKeyboardForLocation(false),
-          );
-        });
-        await this._resetTextListeners();
+      .then(async (msgResult) => {
+        return msgResult;
       });
-    await this._resetTextListeners();
+    // console.log('result ->', result);
+
+    this._bot.on('location', async (msg) => {
+      // console.log(msg);
+      const candidate = await this._userModel.findById(user._id);
+      candidate.tz = find(msg.location.latitude, msg.location.longitude)[0];
+      await candidate.save();
+      await this._bot.sendMessage(
+        chatId,
+        'Location recived',
+        this._getReplyKeyboardForLocation(false),
+      );
+      await this._resetTextListeners();
+    });
+    await this._bot.once('message', async (msg) => {
+      await this._bot.deleteMessage(result.chat.id, result.message_id);
+      this._getReplyKeyboardForLocation(false);
+      await this._resetTextListeners();
+    });
   }
+
+  private async _getStats(chatId, userId) {
+    const user = await this._getUserByChatId(chatId);
+    this._getStatsYear(chatId, userId, user);
+  }
+
+  private async _getStatsYear(chatId, userId, user) {
+    const initMessage = await this._bot
+      .sendMessage(
+        chatId,
+        'Pon año o eligi de los sigientes',
+        this._getInlineKeyboardForYears(),
+      )
+      .then((returnMsg) => {
+        return returnMsg;
+      });
+    await this._bot.clearTextListeners();
+    this._bot.onText(/./, async (msg, match) => {
+      if (msg.text.match(/^(19|20)[\d]{2,2}$/)) {
+        console.log(msg.text);
+        await this._bot.editMessageText(initMessage.text, {
+          chat_id: initMessage.chat.id,
+          message_id: initMessage.message_id,
+        });
+      } else {
+        await this._bot.sendMessage(chatId, 'Año incorrecto');
+      }
+      await this._resetTextListeners();
+    });
+  }
+
+  private async _getStatsMouth(chatId, year) {
+    const initMessage = await this._bot
+      .sendMessage(
+        chatId,
+        'Año elegifo es: ' + year,
+        this._getInlineKeyboardFroMouth(),
+      )
+      .then((returnMsg) => {
+        return returnMsg;
+      });
+  }
+
+  // private async _sendStats(userId, year, mouth) {
+  //   const result =
+  // }
 
   private async _createReport(chatId, userId) {
     const user = await this._getUserByChatId(chatId);
@@ -392,6 +522,42 @@ export class BotService {
     });
   }
 
+  private _getInlineKeyboardForYears() {
+    const result = {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[]],
+      },
+    };
+
+    const year = moment().utc().year();
+
+    for (let i = 0; i < 3; i++) {
+      result.reply_markup.inline_keyboard[0].push({
+        text: year - i,
+        callback_data:
+          i == 0 ? 'current_year' : i == 1 ? 'prev_year' : 'prev_prev_year',
+      });
+    }
+    return result;
+  }
+
+  private _getInlineKeyboardFroMouth() {
+    return {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Junio',
+              callback_data: 'mouth_6',
+            },
+          ],
+        ],
+      },
+    };
+  }
+
   private _getReplyKeyboardForLocation(mode = true) {
     if (!!mode) {
       return {
@@ -404,6 +570,7 @@ export class BotService {
                 request_location: true,
               },
             ],
+            ['Cancel'],
           ],
         },
       };
